@@ -78,13 +78,14 @@ async def callback(code: str, state: str):
         # Insert into the database
         try:
             cursor.execute(
-                "INSERT INTO users (github_id, username, avatar_url, email) " \
-                "VALUES (%s, %s, %s, %s) " \
+                "INSERT INTO users (github_id, username, avatar_url, github_access_token,email) " \
+                "VALUES (%s, %s, %s, %s, %s) " \
                 "ON CONFLICT (github_id) DO UPDATE SET " \
                 "username = EXCLUDED.username, " \
                 "avatar_url = EXCLUDED.avatar_url, " \
+                "github_access_token = EXCLUDED.github_access_token, " \
                 "last_login = NOW() " \
-                "RETURNING id;", (github_id, username, avatar_url, email))
+                "RETURNING id;", (github_id, username, avatar_url, access_token,email))
             user_id = cursor.fetchone()[0]
             conn.commit()
 

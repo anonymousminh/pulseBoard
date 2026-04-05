@@ -20,6 +20,7 @@ CREATE TABLE users (
     username      VARCHAR(255) NOT NULL,
     avatar_url    TEXT,
     email         VARCHAR(255),
+    github_access_token TEXT,
     first_login   TIMESTAMP DEFAULT NOW(),
     last_login    TIMESTAMP DEFAULT NOW()
 );
