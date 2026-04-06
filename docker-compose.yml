@@ -23,7 +23,6 @@ services:
     build: ./ingestion
     environment:
       DATABASE_URL: postgresql://admin:secret@db:5432/pulseboard
-      GITHUB_TOKEN: ${GITHUB_TOKEN}
     depends_on:
       db:
         condition: service_healthy
