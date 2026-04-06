@@ -1,9 +1,9 @@
 import psycopg2
 import os
 import requests
-import math
 from models import IngestionRun, MetricRecord
-from datetime import datetime
+from datetime import datetime, timezone
+from apscheduler.schedulers.blocking import BlockingScheduler
 
 
 # Fetch open issues function
@@ -18,6 +18,8 @@ def fetch_weekly_commits(repo, token) -> float:
     response = requests.get(f"https://api.github.com/repos/{repo}/stats/commit_activity", 
                             headers={"Authorization": f"Bearer {token}"})
     data = response.json()
+    if not isinstance(data, list):
+        return 0.0
     return float(data[-1]["total"])
 
 # Fetch weekly additions
@@ -25,6 +27,8 @@ def fetch_weekly_additions(repo, token) -> float:
     response = requests.get(f"https://api.github.com/repos/{repo}/stats/code_frequency", 
                             headers={"Authorization": f"Bearer {token}"})
     data = response.json()
+    if not isinstance(data, list):
+         return 0.0
     return float(data[-1][1])
 
 # Fetch average PR merge time
@@ -64,8 +68,8 @@ def insert_metric(cursor, run_id: int, metric: MetricRecord):
     )
 
 
-# ----- MAIN ----- #
-def main():
+# Run the ingestion pipeline
+def run_ingestion():
     # Connect to the database
     conn = psycopg2.connect(os.getenv("DATABASE_URL"))
     cursor = conn.cursor()
@@ -80,6 +84,7 @@ def main():
         # Insert ingestion run
         run = IngestionRun(repo=repo, status="success")
         run_id = insert_ingestion_run(cursor, run)
+        conn.commit()
 
         # Fetch -> validate -> insert each metric
         metric_to_fetch = [
@@ -89,15 +94,39 @@ def main():
             ("avg_pr_merge_time_hours", fetch_avg_pr_merge_time)
         ]
 
-        for metric_name, fetch_fn in metric_to_fetch:
-            value = fetch_fn(repo, token)
-            metric = MetricRecord(repo=repo, metric_name=metric_name, value=value)
-            insert_metric(cursor, run_id, metric)
-            
-        conn.commit()
+        try:
+            for metric_name, fetch_fn in metric_to_fetch:
+                value = fetch_fn(repo, token)
+                metric = MetricRecord(repo=repo, metric_name=metric_name, value=value)
+                insert_metric(cursor, run_id, metric)
+                
+            conn.commit()
+        except Exception as e:
+            # Undo all the changes
+            conn.rollback()
+            print(f"[ERROR] Failed run for {repo}: {e}")
+
+            # Update the run status to "error"
+            cursor.execute(
+                "UPDATE ingestion_runs SET status = %s WHERE id = %s;",
+                ("error", run_id)
+            )
+            conn.commit()
+
 
     cursor.close()
     conn.close()
+
+# ----- MAIN ----- #
+def main():
+    print(f"[{datetime.now(timezone.utc)}] Starting ingestion service...")
+    run_ingestion()
+    
+    # Create the BlockingScheduler
+    scheduler = BlockingScheduler()
+    scheduler.add_job(run_ingestion, 'interval', minutes=30)
+    print("Scheduler running every 30 minutes")
+    scheduler.start()
 
 if __name__ == "__main__":
     main()
