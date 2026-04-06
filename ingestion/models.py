@@ -1,12 +1,12 @@
 from pydantic import BaseModel, Field, field_validator
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 
 class MetricRecord(BaseModel):
     repo: str
     metric_name: str
     value: float
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     @field_validator("metric_name")
     @classmethod
@@ -24,6 +24,6 @@ class MetricRecord(BaseModel):
 
 class IngestionRun(BaseModel):
     repo: str
-    fetched_at: datetime = Field(default_factory=datetime.utcnow)
+    fetched_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     status: Literal["success", "partial", "error"]
 
