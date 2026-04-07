@@ -8,7 +8,7 @@ import urllib.parse
 import secrets
 import requests
 import psycopg2
-from jose import jwt, JWTError, ExpiredSignatureError
+from jose import jwt
 from datetime import datetime, timedelta
 
 
@@ -124,3 +124,5 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Security(securi
 @app.get("/me")
 def protected_route(user_id: str = Depends(get_current_user)):
     return {"user_id": user_id}
+
+import routes
