@@ -2,21 +2,27 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi import HTTPException, Depends, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.middleware.cors import CORSMiddleware
 import os
 from dotenv import load_dotenv
 import urllib.parse
 import secrets
 import requests
-import psycopg2
 from jose import jwt
-from datetime import datetime, timedelta
-
-
+from datetime import datetime, timedelta, timezone
 
 load_dotenv()
 
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[os.getenv("FRONTEND_URL")],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 pending_state = set()
 
@@ -31,8 +37,6 @@ async def redirect_link_to_github():
     }
 
     encoded_string = urllib.parse.urlencode(query=query_params)
-
-    # Construct the full URL
     url = "https://github.com/login/oauth/authorize?" + encoded_string
 
     pending_state.add(query_params['state'])
@@ -43,65 +47,50 @@ async def redirect_link_to_github():
 # Callback
 @app.get("/auth/github/callback")
 async def callback(code: str, state: str):
-    # Check if state is in the pending_state
     if state not in pending_state:
         raise HTTPException(status_code=400, detail="Invalid state")
-    else:
-        pending_state.remove(state) # Remove so it cannot be reuse
-        response = requests.post(url="https://github.com/login/oauth/access_token", 
-                                 data= {
-                                     "client_id": os.getenv('GITHUB_CLIENT_ID'),
-                                     "client_secret": os.getenv('GITHUB_CLIENT_SECRET'),
-                                     "code": code
-                                 }, headers={"Accept": "application/json"})
-        token_data = response.json()
-        access_token = token_data.get("access_token")
+    
+    pending_state.remove(state)
+    
+    # Exchange code for access token
+    response = requests.post(
+        url="https://github.com/login/oauth/access_token",
+        data={
+            "client_id": os.getenv('GITHUB_CLIENT_ID'),
+            "client_secret": os.getenv('GITHUB_CLIENT_SECRET'),
+            "code": code
+        },
+        headers={"Accept": "application/json"}
+    )
+    
+    token_data = response.json()
+    access_token = token_data.get("access_token")
 
-        # Check if the access token is None -> raise exception
-        if access_token is None:
-            raise HTTPException(status_code=502, detail="There is no access token")
-        
-        # Use the access token to call the GitHub API and get user's info
-        get_info = requests.get(url="https://api.github.com/user", headers={"Authorization": f"Bearer {access_token}"})
+    if not access_token:
+        raise HTTPException(status_code=400, detail="Failed to get access token")
 
-        # Extract the data
-        user_data = get_info.json()
-        github_id = str(user_data['id'])
-        username = user_data['login']
-        avatar_url = user_data['avatar_url']
-        email = user_data.get('email')
+    # Fetch user data from GitHub
+    user_response = requests.get(
+        "https://api.github.com/user",
+        headers={"Authorization": f"Bearer {access_token}"}
+    )
+    
+    user_data = user_response.json()
+    username = user_data.get("login")
+    avatar_url = user_data.get("avatar_url")
 
-        # Connect to the PostgreSQL
-        conn = psycopg2.connect(os.getenv("DATABASE_URL"))
-        cursor = conn.cursor()
+    # Create JWT token
+    payload = {
+        "sub": username,
+        "avatar_url": avatar_url,
+        "exp": datetime.now(timezone.utc) + timedelta(days=7)
+    }
+    
+    jwt_token = jwt.encode(payload, os.getenv("SECRET_KEY"), algorithm="HS256")
 
-        # Insert into the database
-        try:
-            cursor.execute(
-                "INSERT INTO users (github_id, username, avatar_url, github_access_token,email) " \
-                "VALUES (%s, %s, %s, %s, %s) " \
-                "ON CONFLICT (github_id) DO UPDATE SET " \
-                "username = EXCLUDED.username, " \
-                "avatar_url = EXCLUDED.avatar_url, " \
-                "github_access_token = EXCLUDED.github_access_token, " \
-                "last_login = NOW() " \
-                "RETURNING id;", (github_id, username, avatar_url, access_token,email))
-            user_id = cursor.fetchone()[0]
-            conn.commit()
-
-            # Issue a JWT
-            payload = {
-                "sub": str(user_id),
-                "exp": datetime.utcnow() + timedelta(days=7)
-            }
-
-            token = jwt.encode(payload, os.getenv("SECRET_KEY"), algorithm="HS256")
-        finally:
-            cursor.close()
-            conn.close()
-        
-        frontend_url = os.getenv("FRONTEND_URL")
-        return RedirectResponse(url=f"{frontend_url}?token={token}", status_code=302)
+    # Redirect back to frontend with token
+    frontend_url = os.getenv("FRONTEND_URL")
+    return RedirectResponse(url=f"{frontend_url}?token={jwt_token}", status_code=302)
 
 
 # Helper function
@@ -110,7 +99,6 @@ security = HTTPBearer()
 def get_current_user(credentials: HTTPAuthorizationCredentials = Security(security)):
     token = credentials.credentials
 
-    # Decode and verify the token
     try:
         decode_payload = jwt.decode(token, key=os.getenv("SECRET_KEY"), algorithms=["HS256"])
         return decode_payload['sub']
@@ -118,7 +106,6 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Security(securi
         raise HTTPException(status_code=401, detail="Token has expired")
     except jwt.JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
-
 
 
 @app.get("/me")
