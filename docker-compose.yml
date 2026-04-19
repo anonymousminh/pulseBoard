@@ -50,6 +50,9 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
+    # Bind-mount hides image node_modules; anonymous volume keeps a container copy.
+    # Run npm install on each start so new deps in package.json match that volume.
+    command: sh -c "npm install && npm start"
 
 volumes:
   postgres_data:
