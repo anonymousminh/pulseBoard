@@ -13,21 +13,33 @@ async def get_health():
 # repos endpoint
 @app.get("/repos")
 async def get_repos(user_id: str = Depends(get_current_user)):
-    # Use the user_id to look up the username in users table
     try:
         conn = psycopg2.connect(os.getenv("DATABASE_URL"))
         cursor = conn.cursor()
-
-        cursor.execute("SELECT username FROM users WHERE id = %s;", (user_id,))
+        cursor.execute(
+            "SELECT github_access_token FROM users WHERE username = %s;",
+            (user_id,)
+        )
         row = cursor.fetchone()
-        if row is None:  # Check if fetchone return None -> it should raise an error
-            raise HTTPException(status_code=404, detail="User not found")
-        username = row[0]
     finally:
         cursor.close()
         conn.close()
 
-    return {"repos": [f"{username}/pulseBoard"]}
+    if not row or not row[0]:
+        raise HTTPException(status_code=404, detail="User token not found")
+
+    token = row[0]
+    gh_response = requests.get(
+        "https://api.github.com/user/repos",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"per_page": 100, "sort": "updated", "affiliation": "owner"},
+    )
+
+    if gh_response.status_code != 200:
+        raise HTTPException(status_code=502, detail="Failed to fetch repos from GitHub")
+
+    repos = [r["full_name"] for r in gh_response.json() if not r["fork"]]
+    return {"repos": repos}
 
 
 # metrics endpoint
