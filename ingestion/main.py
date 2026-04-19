@@ -1,34 +1,59 @@
 import psycopg2
 import os
 import requests
+import time
 from models import IngestionRun, MetricRecord
 from datetime import datetime, timezone
 from apscheduler.schedulers.blocking import BlockingScheduler
 
+GITHUB_HEADERS = lambda token: {"Authorization": f"Bearer {token}"}
+
+
+def fetch_github_stats(url: str, token: str, retries: int = 3, wait: int = 5):
+    """
+    GitHub stats endpoints return 202 while they compute data in the background.
+    Retries up to `retries` times with `wait` seconds between attempts.
+    Returns the parsed JSON on 200, or None if still not ready after all retries.
+    """
+    for attempt in range(retries + 1):
+        response = requests.get(url, headers=GITHUB_HEADERS(token))
+        if response.status_code == 200:
+            return response.json()
+        if response.status_code == 202:
+            if attempt < retries:
+                print(f"[INFO] GitHub computing stats ({attempt + 1}/{retries}), retrying in {wait}s… {url}")
+                time.sleep(wait)
+            continue
+        response.raise_for_status()
+    print(f"[WARN] Stats not ready after {retries} retries, skipping: {url}")
+    return None
+
 
 # Fetch open issues function
 def fetch_open_issues(repo: str, token: str) -> float:
-    response = requests.get(f"https://api.github.com/repos/{repo}", 
-                            headers={"Authorization": f"Bearer {token}"})
-    data = response.json()
-    return float(data["open_issues_count"])
+    response = requests.get(
+        f"https://api.github.com/repos/{repo}",
+        headers=GITHUB_HEADERS(token),
+    )
+    response.raise_for_status()
+    return float(response.json()["open_issues_count"])
 
 # Fetch weekly commits
 def fetch_weekly_commits(repo, token) -> float:
-    response = requests.get(f"https://api.github.com/repos/{repo}/stats/commit_activity", 
-                            headers={"Authorization": f"Bearer {token}"})
-    data = response.json()
-    if not isinstance(data, list):
+    data = fetch_github_stats(
+        f"https://api.github.com/repos/{repo}/stats/commit_activity", token
+    )
+    if not isinstance(data, list) or len(data) == 0:
         return 0.0
     return float(data[-1]["total"])
 
 # Fetch weekly additions
 def fetch_weekly_additions(repo, token) -> float:
-    response = requests.get(f"https://api.github.com/repos/{repo}/stats/code_frequency", 
-                            headers={"Authorization": f"Bearer {token}"})
-    data = response.json()
-    if not isinstance(data, list):
-         return 0.0
+    data = fetch_github_stats(
+        f"https://api.github.com/repos/{repo}/stats/code_frequency", token
+    )
+    if not isinstance(data, list) or len(data) == 0:
+        return 0.0
     return float(data[-1][1])
 
 # Fetch average PR merge time
@@ -79,14 +104,18 @@ def run_ingestion():
     users = cursor.fetchall()
 
     for username, token in users:
-        repo = f"{username}/pulseBoard"
+        # Fetch all repos owned by this user from GitHub
+        gh_response = requests.get(
+            "https://api.github.com/user/repos",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"per_page": 100, "sort": "updated", "affiliation": "owner"},
+        )
+        if gh_response.status_code != 200:
+            print(f"[WARN] Could not fetch repos for {username}: {gh_response.status_code}")
+            continue
 
-        # Insert ingestion run
-        run = IngestionRun(repo=repo, status="success")
-        run_id = insert_ingestion_run(cursor, run)
-        conn.commit()
+        repos = [r["full_name"] for r in gh_response.json() if not r["fork"]]
 
-        # Fetch -> validate -> insert each metric
         metric_to_fetch = [
             ("open_issues_count", fetch_open_issues),
             ("weekly_commit_count", fetch_weekly_commits),
@@ -94,24 +123,31 @@ def run_ingestion():
             ("avg_pr_merge_time_hours", fetch_avg_pr_merge_time)
         ]
 
-        try:
-            for metric_name, fetch_fn in metric_to_fetch:
-                value = fetch_fn(repo, token)
-                metric = MetricRecord(repo=repo, metric_name=metric_name, value=value)
-                insert_metric(cursor, run_id, metric)
-                
+        for repo in repos:
+            # Insert ingestion run
+            run = IngestionRun(repo=repo, status="success")
+            run_id = insert_ingestion_run(cursor, run)
             conn.commit()
-        except Exception as e:
-            # Undo all the changes
-            conn.rollback()
-            print(f"[ERROR] Failed run for {repo}: {e}")
 
-            # Update the run status to "error"
-            cursor.execute(
-                "UPDATE ingestion_runs SET status = %s WHERE id = %s;",
-                ("error", run_id)
-            )
-            conn.commit()
+            # Fetch -> validate -> insert each metric
+            try:
+                for metric_name, fetch_fn in metric_to_fetch:
+                    value = fetch_fn(repo, token)
+                    metric = MetricRecord(repo=repo, metric_name=metric_name, value=value)
+                    insert_metric(cursor, run_id, metric)
+
+                conn.commit()
+            except Exception as e:
+                # Undo all the changes for this repo
+                conn.rollback()
+                print(f"[ERROR] Failed run for {repo}: {e}")
+
+                # Update the run status to "error"
+                cursor.execute(
+                    "UPDATE ingestion_runs SET status = %s WHERE id = %s;",
+                    ("error", run_id)
+                )
+                conn.commit()
 
 
     cursor.close()
@@ -124,8 +160,8 @@ def main():
     
     # Create the BlockingScheduler
     scheduler = BlockingScheduler()
-    scheduler.add_job(run_ingestion, 'interval', minutes=30)
-    print("Scheduler running every 30 minutes")
+    scheduler.add_job(run_ingestion, 'interval', minutes=10)
+    print("Scheduler running every 10 minutes")
     scheduler.start()
 
 if __name__ == "__main__":
