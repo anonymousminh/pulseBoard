@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 import urllib.parse
 import secrets
 import requests
+import psycopg2
 from jose import jwt
 from datetime import datetime, timedelta, timezone
 
@@ -76,8 +77,28 @@ async def callback(code: str, state: str):
     )
     
     user_data = user_response.json()
+    github_id = str(user_data.get("id"))
     username = user_data.get("login")
     avatar_url = user_data.get("avatar_url")
+
+    # Upsert user into DB so ingestion and other queries can reference them
+    conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO users (github_id, username, avatar_url, github_access_token)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (github_id)
+        DO UPDATE SET username = EXCLUDED.username,
+                      avatar_url = EXCLUDED.avatar_url,
+                      github_access_token = EXCLUDED.github_access_token,
+                      last_login = NOW();
+        """,
+        (github_id, username, avatar_url, access_token),
+    )
+    conn.commit()
+    cursor.close()
+    conn.close()
 
     # Create JWT token
     payload = {
