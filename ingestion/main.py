@@ -1,6 +1,7 @@
 import psycopg2
 import os
 import requests
+import sys
 import time
 from models import IngestionRun, MetricRecord
 from datetime import datetime, timezone
@@ -155,14 +156,28 @@ def run_ingestion():
 
 # ----- MAIN ----- #
 def main():
+    """
+    Two run modes:
+
+    - default (local docker compose): start the BlockingScheduler and loop forever.
+    - one-shot (Render Cron, GitHub Actions, etc.): pass --once or set
+      RUN_ONCE=1 to ingest a single batch and exit. The external scheduler is
+      then responsible for invoking us every N minutes.
+    """
+    once = "--once" in sys.argv or os.getenv("RUN_ONCE") == "1"
+
     print(f"[{datetime.now(timezone.utc)}] Starting ingestion service...")
     run_ingestion()
-    
-    # Create the BlockingScheduler
+
+    if once:
+        print("RUN_ONCE set, exiting after a single ingestion.")
+        return
+
     scheduler = BlockingScheduler()
-    scheduler.add_job(run_ingestion, 'interval', minutes=10)
+    scheduler.add_job(run_ingestion, "interval", minutes=10)
     print("Scheduler running every 10 minutes")
     scheduler.start()
+
 
 if __name__ == "__main__":
     main()
