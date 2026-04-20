@@ -1,17 +1,3 @@
-# Render Blueprint for pulseBoard.
-# Apply via: https://render.com/docs/blueprint-spec
-#
-# Provisions three things:
-#   1. A Web Service running FastAPI (the backend)
-#   2. A Cron Job that runs the ingestion script every 10 minutes
-#   3. A managed PostgreSQL database
-#
-# After applying you still need to:
-#   - Set GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, SECRET_KEY in the Render dashboard
-#   - Update GITHUB_REDIRECT_URI to your real backend URL
-#   - Update FRONTEND_URL to your Vercel deployment URL
-#   - Update your GitHub OAuth App callback URL to match GITHUB_REDIRECT_URI
-
 databases:
   - name: pulseboard-db
     plan: free
@@ -45,7 +31,7 @@ services:
   - type: cron
     name: pulseboard-ingestion
     runtime: docker
-    plan: free
+    plan: starter
     rootDir: ingestion
     dockerfilePath: ./Dockerfile
     schedule: "*/10 * * * *"
