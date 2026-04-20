@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getToken } from "../utils/auth";
+import Spinner from "./Spinner";
 
 const API_BASE = "http://localhost:8000";
 
@@ -79,7 +80,14 @@ export default function FilterBar({
   return (
     <div style={styles.bar}>
       <label style={styles.field}>
-        <span style={styles.label}>Repository</span>
+        <span style={styles.label}>
+          Repository
+          {reposStatus === "loading" && (
+            <span style={styles.inlineSpinner}>
+              <Spinner size={12} />
+            </span>
+          )}
+        </span>
         <select
           value={repoDisabled ? "" : repo}
           onChange={(e) => onRepoChange(e.target.value)}
@@ -159,6 +167,13 @@ const styles = {
     fontSize: "0.8rem",
     fontWeight: 600,
     color: "#444",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.4rem",
+  },
+  inlineSpinner: {
+    display: "inline-flex",
+    alignItems: "center",
   },
   select: {
     padding: "0.45rem 0.5rem",
