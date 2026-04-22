@@ -12,14 +12,27 @@ import psycopg2
 from jose import jwt
 from datetime import datetime, timedelta, timezone
 
+from db_bootstrap import bootstrap_schema
+
 load_dotenv()
 
 
 app = FastAPI()
 
+
+@app.on_event("startup")
+def _startup():
+    bootstrap_schema()
+
+# FRONTEND_URL accepts a single origin or a comma-separated list, so the same
+# backend can serve local dev (http://localhost:3000), a Vercel preview URL,
+# and the production Vercel URL without redeploying.
+_frontend_env = os.getenv("FRONTEND_URL", "http://localhost:3000")
+ALLOWED_ORIGINS = [o.strip() for o in _frontend_env.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("FRONTEND_URL")],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -109,8 +122,9 @@ async def callback(code: str, state: str):
     
     jwt_token = jwt.encode(payload, os.getenv("SECRET_KEY"), algorithm="HS256")
 
-    # Redirect back to frontend with token
-    frontend_url = os.getenv("FRONTEND_URL")
+    # Redirect back to frontend with token. When FRONTEND_URL contains a list,
+    # the first entry is treated as the canonical SPA URL for OAuth redirects.
+    frontend_url = ALLOWED_ORIGINS[0] if ALLOWED_ORIGINS else "http://localhost:3000"
     return RedirectResponse(url=f"{frontend_url}?token={jwt_token}", status_code=302)
 
 
