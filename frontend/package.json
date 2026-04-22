@@ -2,6 +2,7 @@
   "name": "pulseboard-frontend",
   "version": "0.1.0",
   "private": true,
+  "homepage": "https://anonymousminh.github.io/pulseBoard",
   "dependencies": {
     "jwt-decode": "^4.0.0",
     "react": "^18.2.0",
