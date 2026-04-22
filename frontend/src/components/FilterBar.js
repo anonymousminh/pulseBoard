@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { getToken } from "../utils/auth";
+import { API_BASE } from "../utils/config";
 import Spinner from "./Spinner";
-
-const API_BASE = "http://localhost:8000";
 
 export const METRIC_OPTIONS = [
   { value: "weekly_commit_count", label: "Weekly commits" },
