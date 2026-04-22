@@ -7,8 +7,8 @@ import MetricsChart from "../components/MetricsChart";
 import RepoHealthTable from "../components/RepoHealthTable";
 import AlertPanel from "../components/AlertPanel";
 import Spinner from "../components/Spinner";
+import { API_BASE } from "../utils/config";
 
-const API_BASE = "http://localhost:8000";
 const POLL_INTERVAL_MS = 60_000;
 const STALE_DATA_WARN_MINUTES = 30;
 
