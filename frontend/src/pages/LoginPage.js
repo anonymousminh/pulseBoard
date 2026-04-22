@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { API_BASE } from "../utils/config";
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -23,8 +24,7 @@ export default function LoginPage() {
   }, [navigate]);
 
   const handleGitHubLogin = () => {
-    // Redirect to your backend OAuth endpoint
-    window.location.href = "http://localhost:8000/auth/github/login";
+    window.location.href = `${API_BASE}/auth/github/login`;
   };
 
   return (
