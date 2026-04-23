@@ -60,12 +60,40 @@ export default function DashboardPage() {
   const [healthLoading, setHealthLoading] = useState(false);
   const [healthError, setHealthError] = useState(null);
   const [healthReloadKey, setHealthReloadKey] = useState(0);
+  const [isSeeding, setIsSeeding] = useState(false);
+  const [seedStatus, setSeedStatus] = useState(null);
 
   const handleRepoChange = useCallback((r) => setRepo(r), []);
   const handleMetricChange = useCallback((m) => setMetricName(m), []);
   const handleTimeRangeChange = useCallback((t) => setTimeRange(t), []);
   const retryChart = useCallback(() => setChartReloadKey((k) => k + 1), []);
   const retryHealth = useCallback(() => setHealthReloadKey((k) => k + 1), []);
+
+  const handleSeedData = async () => {
+    const token = getToken();
+    if (!token) return;
+
+    setIsSeeding(true);
+    setSeedStatus(null);
+    try {
+      const res = await fetch(`${API_BASE}/debug/seed`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Seeding failed");
+      setSeedStatus("success");
+      // Reload everything
+      setHealthReloadKey((k) => k + 1);
+      setChartReloadKey((k) => k + 1);
+      // Automatically clear status after 3s
+      setTimeout(() => setSeedStatus(null), 3000);
+    } catch (e) {
+      setSeedStatus("error");
+      setTimeout(() => setSeedStatus(null), 3000);
+    } finally {
+      setIsSeeding(false);
+    }
+  };
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -243,7 +271,20 @@ export default function DashboardPage() {
     <>
       <Header username={username} avatarUrl={avatarUrl} />
       <div style={styles.page}>
-        <h1 style={styles.welcome}>Welcome, {username}</h1>
+        <div style={styles.headerRow}>
+          <h1 style={styles.welcome}>Welcome, {username}</h1>
+          <button 
+            onClick={handleSeedData} 
+            disabled={isSeeding} 
+            style={{
+              ...styles.seedBtn,
+              ...(seedStatus === "success" ? styles.seedBtnSuccess : {}),
+              ...(seedStatus === "error" ? styles.seedBtnError : {}),
+            }}
+          >
+            {isSeeding ? "Seeding..." : seedStatus === "success" ? "Data Seeded!" : seedStatus === "error" ? "Failed" : "Seed Demo Data"}
+          </button>
+        </div>
 
         <RepoHealthTable
           repos={healthRepos}
@@ -300,5 +341,28 @@ const styles = {
     justifyContent: "center",
     minHeight: "100vh",
     backgroundColor: "#f5f5f5",
+  },
+  headerRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-end",
+    marginBottom: "1.25rem",
+  },
+  seedBtn: {
+    padding: "0.5rem 1rem",
+    backgroundColor: "#6366f1",
+    color: "white",
+    border: "none",
+    borderRadius: "6px",
+    cursor: "pointer",
+    fontSize: "0.9rem",
+    fontWeight: 500,
+    transition: "all 0.2s",
+  },
+  seedBtnSuccess: {
+    backgroundColor: "#10b981",
+  },
+  seedBtnError: {
+    backgroundColor: "#ef4444",
   },
 };
