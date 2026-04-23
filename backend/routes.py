@@ -3,6 +3,7 @@ import psycopg2
 import psycopg2.extras
 import os
 import requests
+import random
 from datetime import datetime, timezone, timedelta
 from fastapi import Depends, HTTPException
 
@@ -74,7 +75,12 @@ def _get_user_repos(user_id: str):
     if gh_response.status_code != 200:
         raise HTTPException(status_code=502, detail="Failed to fetch repos from GitHub")
 
-    return [r["full_name"] for r in gh_response.json() if not r["fork"]]
+    repos = [r["full_name"] for r in gh_response.json() if not r["fork"]]
+    
+    # Add demo repos for easier visualization
+    repos.extend(["demo/awesome-project", "demo/legacy-app", "demo/visualizer-tool"])
+    
+    return repos
 
 
 # repos endpoint
@@ -112,6 +118,57 @@ async def get_metrics(repo: str, metric_name: str = None, user_id: str = Depends
         conn.close()
 
     return [{"metric_name": m[0], "value": m[1], "timestamp": m[2]} for m in metrics]
+
+
+# Debug endpoint to seed dummy data
+@app.post("/debug/seed")
+async def seed_data(user_id: str = Depends(get_current_user)):
+    """Seed 30 days of dummy data for the current user and some demo repos."""
+    try:
+        conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+        cursor = conn.cursor()
+        
+        repos = ["demo/awesome-project", "demo/legacy-app", "demo/visualizer-tool"]
+        metrics_config = {
+            "open_issues_count": {"base": 50, "variation": 20, "trend": 0.5},
+            "avg_pr_merge_time_hours": {"base": 48, "variation": 24, "trend": -0.2},
+            "weekly_commit_count": {"base": 15, "variation": 10, "trend": 0.1},
+        }
+
+        now = datetime.now(timezone.utc)
+        
+        for repo in repos:
+            for day in range(30, -1, -1):
+                timestamp = now - timedelta(days=day)
+                cursor.execute(
+                    "INSERT INTO ingestion_runs (fetched_at, repo, status) "
+                    "VALUES (%s, %s, %s) RETURNING id;",
+                    (timestamp, repo, "success")
+                )
+                run_id = cursor.fetchone()[0]
+                
+                for metric_name, cfg in metrics_config.items():
+                    day_index = 30 - day
+                    value = cfg["base"] + (day_index * cfg["trend"]) + random.uniform(-cfg["variation"], cfg["variation"])
+                    value = max(0, value)
+                    
+                    cursor.execute(
+                        "INSERT INTO metrics (run_id, timestamp, repo, metric_name, value) "
+                        "VALUES (%s, %s, %s, %s, %s);",
+                        (run_id, timestamp, repo, metric_name, value)
+                    )
+        
+        conn.commit()
+        return {"status": "success", "message": "Seeded 30 days of data for 3 repos"}
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 
 def _evaluate_threshold(metric_name: str, value):
