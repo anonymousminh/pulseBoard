@@ -13,6 +13,9 @@ from jose import jwt
 from datetime import datetime, timedelta, timezone
 
 from db_bootstrap import bootstrap_schema
+from ingestion.main import run_ingestion
+from apscheduler.schedulers.background import BackgroundScheduler
+import threading
 
 load_dotenv()
 
@@ -23,6 +26,14 @@ app = FastAPI()
 @app.on_event("startup")
 def _startup():
     bootstrap_schema()
+    
+    # Setup the background scheduler
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(run_ingestion, "interval", minutes=10)
+    scheduler.start()
+    
+    # Run once immediately in a separate thread so we don't block boot
+    threading.Thread(target=run_ingestion, daemon=True).start()
 
 # FRONTEND_URL accepts a single origin or a comma-separated list, so the same
 # backend can serve local dev (http://localhost:3000), a Vercel preview URL,

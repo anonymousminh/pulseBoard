@@ -3,7 +3,7 @@ import os
 import requests
 import sys
 import time
-from models import IngestionRun, MetricRecord
+from .models import IngestionRun, MetricRecord
 from datetime import datetime, timezone
 from apscheduler.schedulers.blocking import BlockingScheduler
 
