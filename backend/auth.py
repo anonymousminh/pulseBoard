@@ -35,11 +35,18 @@ def _startup():
     # Run once immediately in a separate thread so we don't block boot
     threading.Thread(target=run_ingestion, daemon=True).start()
 
-# FRONTEND_URL accepts a single origin or a comma-separated list, so the same
-# backend can serve local dev (http://localhost:3000), a Vercel preview URL,
-# and the production Vercel URL without redeploying.
+# FRONTEND_URL accepts a single origin or a comma-separated list.
+# We strip trailing slashes and whitespace to prevent CORS mismatches.
 _frontend_env = os.getenv("FRONTEND_URL", "http://localhost:3000")
-ALLOWED_ORIGINS = [o.strip() for o in _frontend_env.split(",") if o.strip()]
+_raw_origins = [o.strip().rstrip("/") for o in _frontend_env.split(",") if o.strip()]
+
+# We allow both versions (with and without trailing slash) to be safe.
+ALLOWED_ORIGINS = []
+for o in _raw_origins:
+    ALLOWED_ORIGINS.append(o)
+    ALLOWED_ORIGINS.append(f"{o}/")
+
+print(f"[CORS] Allowed origins: {ALLOWED_ORIGINS}")
 
 app.add_middleware(
     CORSMiddleware,
